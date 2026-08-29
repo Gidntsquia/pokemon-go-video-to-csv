@@ -1,0 +1,11 @@
+{
+  "name": "pokemon-go-video-to-csv",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "scan": "node scripts/scan-video.mjs",
+    "test": "node --test test/*.test.js"
+  }
+}
