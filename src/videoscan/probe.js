@@ -1,13 +1,16 @@
 // JavaScript Document
 //
 // Runs scan.swift (see that file's header) over a video and yields one parsed
-// observation per sampled frame. This is the only module in src/videoscan
-// that touches a subprocess or the platform -- everything else is pure and
-// testable against recorded frames.
+// observation per sampled frame. Together with probe-win.js this is the only
+// part of src/videoscan that touches a subprocess or the platform --
+// everything else is pure and testable against recorded frames.
 //
-// macOS only: frame decoding is AVFoundation and the text recognizer is
+// On macOS: frame decoding is AVFoundation and the text recognizer is
 // Apple's Vision framework, both of which ship with the OS, which is why this
-// feature needs no npm dependency, no ffmpeg, and no OCR install.
+// feature needs no npm dependency, no ffmpeg, and no OCR install there.
+// On Windows (or WSL) the same Frames come from probe-win.js instead:
+// ffmpeg decodes, pixels.js measures, and the OS's built-in Windows OCR
+// reads the text.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -16,6 +19,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { platform } from 'node:process';
+import { isWsl, probeVideoWin } from './probe-win.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SCAN_SWIFT_PATH = path.join(HERE, 'scan.swift');
@@ -56,6 +60,22 @@ export const AURA_BOXES = [
 ];
 
 /**
+ * More mean-colour boxes, appended after AURA_BOXES: one reference tile of
+ * bare card left of the type badges, then a row of thin tiles across where
+ * the badge circles are drawn. badges.js reads the circles' colours out of
+ * them to name a form whose badge *text* is hidden behind the trainer
+ * avatar. The row stops at 0.61 because the avatar's hair starts there.
+ *
+ * On a recording whose card sits elsewhere (a different aspect ratio) the
+ * tiles land on bare card, badges.js sees no circles, and everything falls
+ * back to how it worked before the tiles existed.
+ */
+export const BADGE_TILES = [
+  { x: 0.36, y: 0.528, w: 0.04, h: 0.024 },
+  ...Array.from({ length: 9 }, (_, i) => ({ x: 0.43 + i * 0.02, y: 0.528, w: 0.02, h: 0.024 })),
+];
+
+/**
  * @typedef {object} Frame
  * @property {number} t - presentation timestamp in seconds.
  * @property {number} w
@@ -64,7 +84,9 @@ export const AURA_BOXES = [
  * @property {{y: number, runs: number[][]}[]} rows
  * @property {number[][]} [strip] - mean [r,g,b] of each row of STRIP_REGION,
  *   top to bottom. Absent on frames recorded before the strip existed.
- * @property {number[][]} [boxes] - mean [r,g,b] of each of AURA_BOXES.
+ * @property {number[][]} [boxes] - mean [r,g,b] of each requested box:
+ *   AURA_BOXES first, then BADGE_TILES. Older recorded frames may carry only
+ *   the aura four, or none.
  */
 
 /**
@@ -77,12 +99,6 @@ export const AURA_BOXES = [
  * @returns {AsyncGenerator<Frame>}
  */
 export async function* probeVideo(videoPath, opts = {}) {
-  if (platform !== 'darwin') {
-    throw new Error(
-      'videoscan needs macOS: it decodes frames with AVFoundation and reads ' +
-        'text with the Vision framework, both of which are macOS system frameworks.'
-    );
-  }
   try {
     if (!statSync(videoPath).isFile()) throw new Error('not a file');
   } catch {
@@ -91,7 +107,19 @@ export async function* probeVideo(videoPath, opts = {}) {
   const interval = opts.interval ?? 0.25;
   const region = opts.region ?? DEFAULT_REGION;
   const strip = opts.strip ?? STRIP_REGION;
-  const boxes = opts.boxes ?? AURA_BOXES;
+  const boxes = opts.boxes ?? [...AURA_BOXES, ...BADGE_TILES];
+
+  if (platform !== 'darwin') {
+    if (platform === 'win32' || isWsl()) {
+      yield* probeVideoWin(videoPath, { interval, region, strip, boxes, signal: opts.signal });
+      return;
+    }
+    throw new Error(
+      'videoscan needs macOS (AVFoundation + Vision) or Windows/WSL ' +
+        '(ffmpeg + the built-in Windows OCR) -- plain Linux has neither a ' +
+        'decoder nor a text recognizer to lean on.'
+    );
+  }
 
   const [command, leadingArgs] = await scanCommand();
   const child = spawn(

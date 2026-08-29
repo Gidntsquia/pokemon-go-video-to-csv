@@ -181,9 +181,19 @@ export function findBands(rows, frameWidth) {
       current.yEnd = row.y;
       current.x0 = bar.x0;
       current.width = bar.width;
+      current.x0s.push(bar.x0);
+      current.widths.push(bar.width);
       current.fractions.push(bar.fraction);
     } else {
-      current = { yStart: row.y, yEnd: row.y, x0: bar.x0, width: bar.width, fractions: [bar.fraction] };
+      current = {
+        yStart: row.y,
+        yEnd: row.y,
+        x0: bar.x0,
+        width: bar.width,
+        x0s: [bar.x0],
+        widths: [bar.width],
+        fractions: [bar.fraction],
+      };
       bands.push(current);
     }
   }
@@ -193,11 +203,15 @@ export function findBands(rows, frameWidth) {
     .map((b) => ({
       yStart: b.yStart,
       yEnd: b.yEnd,
-      x0: b.x0,
-      width: b.width,
+      // Medians, not the last row's values: the top and bottom rows of a bar
+      // are anti-aliased and read a few pixels narrow, and a band that ends
+      // on such a row must not carry that row's width as its own -- that is
+      // what made one bar of a trio look like a different-sized band.
+      x0: median(b.x0s),
+      width: median(b.widths),
       rows: b.fractions.length,
-      // Median, not mean: the top and bottom rows of a bar are anti-aliased
-      // and read a little short, and a median ignores them outright.
+      // Median for the same reason: those edge rows also read a little
+      // short, and a median ignores them outright.
       fraction: median(b.fractions),
     }));
 }
@@ -249,10 +263,18 @@ export function readAppraisal(rows, frameWidth) {
 function pickTrio(bands, tolerance) {
   const groups = [];
   for (const band of bands) {
-    const group = groups.find(
-      (g) =>
-        Math.abs(g[0].x0 - band.x0) <= tolerance.x &&
-        Math.abs(g[0].width - band.width) <= tolerance.width
+    // Matched against every member, not just the group's first: bar widths
+    // drift a few pixels from bar to bar (anti-aliased ends, and a maxed
+    // bar's red fill measures slightly narrower than orange), the same drift
+    // findBands already tolerates row to row. Anchoring to the first band
+    // splits Attack at 133 wide from HP at 128 even though Defense at 130
+    // plainly chains them.
+    const group = groups.find((g) =>
+      g.some(
+        (member) =>
+          Math.abs(member.x0 - band.x0) <= tolerance.x &&
+          Math.abs(member.width - band.width) <= tolerance.width
+      )
     );
     if (group) group.push(band);
     else groups.push([band]);

@@ -12,6 +12,19 @@
 /** Vision reads the (c) form badge and stray glyphs into the caption; drop them. */
 const CAPTION_RE = /\bthis\s+(.+?)\s+(?:was|is|were)\b/i;
 const CP_RE = /^cp\s*([0-9]{1,5})$/i;
+/**
+ * The stylized "CP" prefix misread as a bare 0 or O glued to the number --
+ * "01498" for CP 1498. Windows OCR does it on every frame and Vision on
+ * some. A Pokemon's CP never starts with 0, so a leading zero on a number
+ * this size can only be that prefix. It is weaker evidence than the literal
+ * letters, so it only counts where the CP is actually drawn -- the top of
+ * the screen (see CP_BAND) -- and only for 3+ digits: stray digit pairs
+ * ("67" off a weight or stardust line) misread with a leading artifact are
+ * common enough to poison the vote otherwise.
+ */
+const CP_MISREAD_RE = /^[o0]([1-9][0-9]{2,4})$/i;
+/** How far down the screen the CP text can sit, as a fraction of height. */
+const CP_BAND = 0.2;
 const HP_RE = /^([0-9]{1,4})\s*[/|]\s*([0-9]{1,4})\s*hp\b/i;
 
 /** pvpoke gamemaster type names, as printed on the appraisal screen badges. */
@@ -50,7 +63,8 @@ function clean(s) {
 export function readCp(boxes) {
   const candidates = [];
   for (const box of boxes) {
-    const m = CP_RE.exec(clean(box.s).replace(/\s+/g, ''));
+    const squeezed = clean(box.s).replace(/\s+/g, '');
+    const m = CP_RE.exec(squeezed) ?? (box.y < CP_BAND ? CP_MISREAD_RE.exec(squeezed) : null);
     if (m) candidates.push({ y: box.y, cp: Number(m[1]) });
   }
   if (candidates.length === 0) {
@@ -76,7 +90,10 @@ export function readCp(boxes) {
  * @returns {number}
  */
 export function countCpBoxes(boxes) {
-  return boxes.filter((b) => CP_RE.test(clean(b.s).replace(/\s+/g, ''))).length;
+  return boxes.filter((b) => {
+    const squeezed = clean(b.s).replace(/\s+/g, '');
+    return CP_RE.test(squeezed) || (b.y < CP_BAND && CP_MISREAD_RE.test(squeezed));
+  }).length;
 }
 
 /**
@@ -149,13 +166,23 @@ export function readTypes(boxes) {
     .sort((a, b) => a.x - b.x);
   for (const box of inBand) {
     for (const raw of String(box.s ?? '').split(/[/|,·•]+/)) {
-      const token = raw
+      let token = raw
         .normalize('NFD')
         .replace(/[^A-Za-z]/g, '')
         .toLowerCase();
       if (token.length < 3) continue;
       const hits = POKEMON_TYPES.filter((t) => t.startsWith(token) || token.startsWith(t));
-      if (hits.length === 1 && !found.includes(hits[0])) found.push(hits[0]);
+      if (hits.length !== 1) continue;
+      if (!found.includes(hits[0])) found.push(hits[0]);
+      // A dual badge sometimes arrives as one unbroken token with the
+      // separator lost and the second name clipped at the front by the
+      // trainer avatar: "poisonairy" is POISON then [F]AIRY. What is left
+      // after the first type is matched as one type's tail -- three letters
+      // at least, or "on"/"er" endings pair with half the list.
+      const rest = token.startsWith(hits[0]) ? token.slice(hits[0].length) : '';
+      if (rest.length < 3) continue;
+      const tails = POKEMON_TYPES.filter((t) => t !== hits[0] && (t.endsWith(rest) || rest.startsWith(t)));
+      if (tails.length === 1 && !found.includes(tails[0])) found.push(tails[0]);
     }
   }
   return found;

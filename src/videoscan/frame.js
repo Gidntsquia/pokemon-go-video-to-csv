@@ -12,6 +12,7 @@
 
 import { readAppraisal } from './bars.js';
 import { auraMeasure } from './aura.js';
+import { readBadgeColors } from './badges.js';
 import { readsPurifyButton } from './purify.js';
 import { countCpBoxes, readCp, readMaxHp, readSpeciesCaptions, readTypes, readsShadow } from './text.js';
 
@@ -89,6 +90,10 @@ export function readFrame(frame, { resolveCaption }) {
       // only consulted for a Pokemon whose button never showed: the button
       // states shadow outright, the aura only resembles it.
       aura: auraMeasure(frame.boxes),
+      // The badge circles' colours, one plausible-type set per circle (see
+      // badges.js) -- the form evidence that survives the trainer avatar
+      // standing over the badge text.
+      badges: readBadgeColors(frame.boxes),
       purified: species.purified,
       // Both optional. The Pokemon's own animation is drawn *over* the CP
       // text, so on a frame where a wing or a flame crosses it the number

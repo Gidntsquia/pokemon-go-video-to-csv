@@ -4,7 +4,8 @@
 // screen in, one row per Pokemon out, in the same generic CSV shape
 // src/importer already reads.
 //
-//   scan.swift   decode frames, OCR text, run-length encode bar pixels
+//   probe.js     decode frames, OCR text, run-length encode bar pixels
+//                (scan.swift on macOS, probe-win.js on Windows/WSL)
 //     -> frame.js   accept/reject each frame, read CP + species + IVs
 //     -> group.js   collapse consecutive agreeing frames into one Pokemon
 //     -> level.js   derive the level, and cross-check CP/HP against the IVs
@@ -77,7 +78,7 @@ export async function scanVideo(videoPath, opts = {}) {
 
 /**
  * The whole pipeline downstream of decoding, over any iterable of frames.
- * `scanVideo` is this fed by the Swift probe; tests feed it recorded frames.
+ * `scanVideo` is this fed by the platform probe; tests feed it recorded frames.
  *
  * @param {AsyncIterable<import('./probe.js').Frame>|Iterable<import('./probe.js').Frame>} source
  * @param {object} [opts] - as scanVideo, minus the decoding options.
@@ -189,6 +190,10 @@ export async function scanFrames(source, opts = {}) {
 
   if (opts.deriveLevels !== false) {
     await resolveStats(mons, groups, warnings, opts.cp ?? 1500);
+    // resolveStats marks the rows its arithmetic proved to be misreads.
+    for (let i = mons.length - 1; i >= 0; i--) {
+      if (mons[i].dropped) mons.splice(i, 1);
+    }
   } else {
     // Which form a caption meant is settled by the CP/HP arithmetic, so
     // --no-level leaves it at the likeliest guess rather than an answer.
@@ -231,15 +236,40 @@ async function resolveStats(mons, groups, warnings, cp) {
       : [{ speciesId: mon.speciesId, name: mon.name, types: [] }];
 
     const tried = candidates.map((candidate, rank) =>
-      settleAs(candidate, rank, mon, votes, group.types ?? [], deriveLevel)
+      settleAs(candidate, rank, mon, votes, group.types ?? [], group.badges ?? [], deriveLevel)
     );
-    const best = tried.reduce((a, b) => (compareFits(a, b) <= 0 ? a : b));
+    let best = tried.reduce((a, b) => (compareFits(a, b) <= 0 ? a : b));
 
     if (candidates.length > 1) {
       mon.speciesId = best.candidate.speciesId;
       mon.name = best.candidate.name;
       const note = formWarning(best, tried, group.types ?? []);
       if (note) warnings.push(note);
+    }
+
+    // Second look at the bars, now that the form is settled: when no CP that
+    // was literally read fits the bars as measured, but shifting exactly one
+    // stat by one notch makes a read CP, the HP and the level agree
+    // perfectly, the bar was measured a hair on the wrong side of a notch --
+    // the appraisal bar is the one reading here with an analog failure mode,
+    // and CP text does not misread into a number that fits this well.
+    const fixed = ivVariantFix(best, votes, deriveLevel);
+    if (fixed) {
+      warnings.push(
+        `${mon.name}: CP ${fixed.cp} was read off the screen but no level produces it with the bars ` +
+          `as measured (${mon.ivs.atk}/${mon.ivs.def}/${mon.ivs.hp}) -- ` +
+          `${fixed.ivs.atk}/${fixed.ivs.def}/${fixed.ivs.hp} fits it and the ${mon.maxHp} HP exactly, ` +
+          'so one bar was taken to be off by a notch'
+      );
+      mon.ivs = fixed.ivs;
+      best = {
+        ...best,
+        cp: fixed.cp,
+        chosen: { cp: fixed.cp, evidence: 'exact', reconstructed: false },
+        possible: fixed.possible,
+        fit: fixed.fit,
+        hpIgnored: false,
+      };
     }
 
     // Everything below is reported for the form that was chosen, in the same
@@ -284,10 +314,26 @@ async function resolveStats(mons, groups, warnings, cp) {
     mon.levelStatus = best.fit.status;
 
     if (best.fit.status === 'none') {
-      warnings.push(
-        `${mon.name} (CP ${mon.cp}): no level produces CP ${mon.cp} with IVs ` +
-          `${mon.ivs.atk}/${mon.ivs.def}/${mon.ivs.hp} -- this row is probably misread, check it before using it`
-      );
+      if (group.frames === 1 && (mon.maxHp === undefined || best.possible.status === 'none')) {
+        // One frame, nothing to corroborate it, and a CP the stats rule out:
+        // that is a swipe-blur misread, not a Pokemon. It shows up when the
+        // OCR garbles one digit of the CP on a single frame, which splits the
+        // real Pokemon's run in two and leaves the bad frame as a group of
+        // its own -- the real Pokemon is still written from its other frames.
+        // An HP is corroboration only if it is consistent with something: a
+        // lone frame whose HP fits its IVs at no level either is the same
+        // swipe blur with one more garbled number in it.
+        mon.dropped = true;
+        warnings.push(
+          `${mon.name}: one frame read CP ${mon.cp}, which no level produces with IVs ` +
+            `${mon.ivs.atk}/${mon.ivs.def}/${mon.ivs.hp} -- dropped as a misread`
+        );
+      } else {
+        warnings.push(
+          `${mon.name} (CP ${mon.cp}): no level produces CP ${mon.cp} with IVs ` +
+            `${mon.ivs.atk}/${mon.ivs.def}/${mon.ivs.hp} -- this row is probably misread, check it before using it`
+        );
+      }
     } else if (best.fit.status === 'ambiguous') {
       warnings.push(
         `${mon.name} (CP ${mon.cp}): levels ${best.fit.candidates.join(', ')} all fit -- wrote ${best.fit.level}`
@@ -306,9 +352,11 @@ async function resolveStats(mons, groups, warnings, cp) {
  * @param {{ivs: object, shadow: boolean, maxHp?: number}} mon
  * @param {{value: number, count: number}[]} votes - CPs read off the screen.
  * @param {string[]} types - type badges read off the screen.
+ * @param {string[][][]} badges - per frame, per badge circle, the types its
+ *   colour could be (see badges.js).
  * @param {ReturnType<import('./level.js').createLevelDeriver>} deriveLevel
  */
-function settleAs(candidate, rank, mon, votes, types, deriveLevel) {
+function settleAs(candidate, rank, mon, votes, types, badges, deriveLevel) {
   const key = { speciesId: candidate.speciesId, shadow: mon.shadow, ivs: mon.ivs };
   let possible = { status: 'none', cps: [], candidates: [] };
   let chosen = null;
@@ -316,7 +364,15 @@ function settleAs(candidate, rank, mon, votes, types, deriveLevel) {
     possible = deriveLevel({ ...key, maxHp: mon.maxHp });
     chosen = chooseCp(votes, possible.cps);
   }
-  const cp = chosen ? chosen.cp : votes[0]?.value;
+  let cp = chosen?.cp;
+  if (cp === undefined && votes.length > 0) {
+    // No HP to arbitrate between the readings (or none of them fits it).
+    // Commonest-first is the wrong order when a recurring artifact outvotes
+    // the real number, so prefer the first reading the stats can explain at
+    // all -- a CP that exists at some level over one that exists at none.
+    const backed = votes.find((v) => deriveLevel({ ...key, cp: v.value }).status !== 'none');
+    cp = (backed ?? votes[0]).value;
+  }
 
   let fit = { status: 'none', candidates: [], cps: [] };
   let hpIgnored = false;
@@ -347,7 +403,64 @@ function settleAs(candidate, rank, mon, votes, types, deriveLevel) {
     // cannot have it is ruled out -- the only thing that separates Oricorio's
     // four forms, which are stat-for-stat identical.
     typeOk: types.length === 0 || candidate.types.length === 0 || types.every((t) => candidate.types.includes(t)),
+    badgeOut: badgeOut(candidate, badges),
   };
+}
+
+/**
+ * On how many frames do the badge circles' colours rule this form out?
+ *
+ * A frame rules a form out when it shows more circles than the form has
+ * types, or a circle whose colour could be none of them -- a plain Weezing
+ * has one badge where a Galarian one has two, and a pink second circle is
+ * not poison however it is read. Circles whose colour matched nothing on the
+ * palette (the avatar's hair clipping the row) say nothing and are skipped.
+ *
+ * @param {{types: string[]}} candidate
+ * @param {string[][][]} badges - per frame, per circle, its plausible types.
+ * @returns {number}
+ */
+function badgeOut(candidate, badges) {
+  const t = candidate.types;
+  if (t.length === 0) return 0;
+  let out = 0;
+  for (const frame of badges) {
+    const named = frame.filter((set) => set.length > 0);
+    if (named.length === 0) continue;
+    if (named.length > t.length || named.some((set) => !set.some((type) => t.includes(type)))) out += 1;
+  }
+  return out;
+}
+
+/**
+ * The one-notch bar correction resolveStats applies after the form is
+ * settled: the single ±1-of-one-stat variant of the measured IVs, if exactly
+ * one exists, under which a CP that was literally read off the screen agrees
+ * with the max HP at an exact level. Null when the reading needs no fixing
+ * (a read CP already fits) or no unique variant explains it.
+ *
+ * @returns {{ivs: object, cp: number, fit: object, possible: object}|null}
+ */
+function ivVariantFix(best, votes, deriveLevel) {
+  const { mon, candidate } = best;
+  if (mon.maxHp === undefined || votes.length === 0) return null;
+  if (best.chosen?.evidence === 'exact') return null;
+
+  const hits = [];
+  for (const stat of ['atk', 'def', 'hp']) {
+    for (const d of [-1, 1]) {
+      const ivs = { ...mon.ivs, [stat]: mon.ivs[stat] + d };
+      if (ivs[stat] < 0 || ivs[stat] > 15) continue;
+      const key = { speciesId: candidate.speciesId, shadow: mon.shadow, ivs };
+      const possible = deriveLevel({ ...key, maxHp: mon.maxHp });
+      const agreed = votes.find((v) => possible.cps.includes(v.value));
+      if (!agreed) continue;
+      const fit = deriveLevel({ ...key, cp: agreed.value, maxHp: mon.maxHp });
+      if (fit.status !== 'exact') continue;
+      hits.push({ ivs, cp: agreed.value, fit, possible });
+    }
+  }
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /**
@@ -360,9 +473,13 @@ function scoreFit(r) {
   return [
     r.fit.status === 'none' ? 0 : 1, // a form that produces no level at all is out
     r.hpIgnored ? 0 : 1, // ... then one that explains the CP *and* the HP
-    r.chosen && !r.chosen.reconstructed ? 1 : 0, // ... and the CP as literally read
+    // ... and the CP by the strength of its evidence: literally read beats
+    // recovered from a truncation ("172" narrows 1272 vs 1271), which beats
+    // merely being the only number the stats allow.
+    { exact: 2, partial: 1 }[r.chosen?.evidence] ?? 0,
     r.fit.status === 'exact' ? 1 : 0,
-    r.typeOk ? 1 : 0, // ... and only then the badge, to break what is left
+    r.typeOk ? 1 : 0, // ... and only then the badges, to break what is left:
+    -r.badgeOut, // the text first, then the circles' colours (fewest frames ruling it out)
   ];
 }
 
@@ -408,9 +525,12 @@ function formWarning(best, tried, types) {
     );
   }
   if (tiedOnNumbers.length > 0) {
+    const evidence = types.length
+      ? `the "${types.join('/')}" badge on the card`
+      : "the colour of the card's type badges";
     return (
-      `${lead} and its stats fit ${tiedOnNumbers.length + 1} of them equally -- the "${types.join('/')}" ` +
-      `badge on the card is ${best.candidate.name} and not ${tiedOnNumbers.map((t) => t.candidate.name).join(', ')}`
+      `${lead} and its stats fit ${tiedOnNumbers.length + 1} of them equally -- ${evidence} ` +
+      `is ${best.candidate.name} and not ${tiedOnNumbers.map((t) => t.candidate.name).join(', ')}`
     );
   }
   if (best.rank === 0) return null; // the likeliest form, and the numbers agree
@@ -435,17 +555,27 @@ export function chooseCp(votes, possible) {
 
   // Best case: a CP that was actually read is one the stats allow.
   const agreed = votes.find((v) => allowed.includes(v.value));
-  if (agreed) return { cp: agreed.value, reconstructed: false };
+  if (agreed) return { cp: agreed.value, evidence: 'exact', reconstructed: false };
 
   // Otherwise the number on screen was cut off. A truncated reading is still
   // evidence: "96" narrows 968 vs 1968 the way no other signal can.
-  const partial = allowed.filter((cp) =>
-    votes.some((v) => {
-      const [whole, read] = [String(cp), String(v.value)];
-      return whole !== read && (whole.startsWith(read) || whole.endsWith(read));
-    })
-  );
-  if (partial.length === 1) return { cp: partial[0], reconstructed: true };
-  if (allowed.length === 1) return { cp: allowed[0], reconstructed: true };
+  const partial = allowed.filter((cp) => votes.some((v) => partialRead(String(cp), String(v.value))));
+  if (partial.length === 1) return { cp: partial[0], evidence: 'partial', reconstructed: true };
+  if (allowed.length === 1) return { cp: allowed[0], evidence: 'sole', reconstructed: true };
   return null;
+}
+
+/**
+ * Could `read` be `whole` with one contiguous span of digits covered? The
+ * animation crosses the CP text as one shape, so it takes out the start, the
+ * end, or a run in the middle -- "172" is 1272 with the 2 covered, and a
+ * mid-gap needs at least a digit surviving on each side before it counts.
+ */
+function partialRead(whole, read) {
+  if (read.length >= whole.length) return false;
+  if (whole.startsWith(read) || whole.endsWith(read)) return true;
+  for (let take = 1; take < read.length; take++) {
+    if (whole.startsWith(read.slice(0, take)) && whole.endsWith(read.slice(take))) return true;
+  }
+  return false;
 }

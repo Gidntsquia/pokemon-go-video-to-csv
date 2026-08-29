@@ -23,6 +23,7 @@ import { createFormResolver, DEFAULT_FORMS } from '../src/videoscan/forms.js';
 import { readFrame } from '../src/videoscan/frame.js';
 import { readsPurifyButton } from '../src/videoscan/purify.js';
 import { auraMeasure, auraVerdict } from '../src/videoscan/aura.js';
+import { classify, readBadgeColors } from '../src/videoscan/badges.js';
 import { chooseCp, scanFrames } from '../src/videoscan/index.js';
 import { groupReadings, mergeDuplicates } from '../src/videoscan/group.js';
 import { toCsv } from '../src/videoscan/csv.js';
@@ -363,6 +364,121 @@ test('mergeDuplicates silently rejoins one Pokemon split by a blink', () => {
   assert.deepEqual(merged, []);
 });
 
+test('mergeDuplicates rejoins a run split by a late HP and a garbled CP', () => {
+  // As Windows OCR reads a card sliding in: the first frames show the CP but
+  // no HP line yet, and on the frame where the HP appears the CP comes back
+  // garbled -- which splits the run, because identity falls back to the CP
+  // exactly where the HP is missing.
+  const { mons, merged } = mergeDuplicates(
+    groupReadings([
+      { t: 0, reading: reading(0, { maxHp: undefined }) },
+      { t: 0.25, reading: reading(0.25, { maxHp: undefined }) },
+      { t: 0.5, reading: reading(0.5, { cp: 149 }) },
+      { t: 0.75, reading: reading(0.75) },
+    ])
+  );
+  assert.equal(mons.length, 1);
+  assert.equal(mons[0].frames, 4);
+  assert.equal(mons[0].maxHp, 128);
+  assert.ok(mons[0].cpVotes.some((v) => v.value === 1498));
+  assert.deepEqual(merged, []);
+});
+
+test('groupReadings keeps one Pokemon whose CP lost a digit in the middle', () => {
+  // Recorded off a real scan: "146" is 1496 with the 9 covered, and treating
+  // it as a different number tore one Archen into two rows.
+  const groups = groupReadings([
+    { t: 0, reading: reading(0, { cp: 1496 }) },
+    { t: 0.15, reading: reading(0.15, { cp: 146, maxHp: undefined }) },
+    { t: 0.3, reading: reading(0.3, { cp: 1496, maxHp: undefined }) },
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].cpVotes[0].value, 1496);
+});
+
+test('mergeDuplicates rejoins the halves when the HP side only ever saw a cut CP', () => {
+  // The measured shape of the split: the HP line and the full CP are never
+  // legible on the same frame, so the HP-bearing half's only vote is the
+  // truncated "149". The truncation itself is the agreement.
+  const { mons } = mergeDuplicates(
+    groupReadings([
+      { t: 0, reading: reading(0, { maxHp: undefined }) },
+      { t: 0.25, reading: reading(0.25, { maxHp: undefined }) },
+      { t: 0.5, reading: reading(0.5, { cp: 149 }) },
+      { t: 0.75, reading: reading(0.75, { cp: 149 }) },
+    ])
+  );
+  assert.equal(mons.length, 1);
+  assert.equal(mons[0].maxHp, 128);
+  assert.ok(mons[0].cpVotes.some((v) => v.value === 1498));
+});
+
+test('mergeDuplicates rejoins a run split in three by one garbled frame', () => {
+  // As recorded off a real scan: the frame that garbles the CP loses the HP
+  // line too, leaving it alone between an HP-less lead-in and the HP-bearing
+  // rest -- the lead-in only pairs up once the middle has been folded in.
+  const { mons, merged } = mergeDuplicates(
+    groupReadings([
+      { t: 0, reading: reading(0, { maxHp: undefined }) },
+      { t: 0.25, reading: reading(0.25, { maxHp: undefined }) },
+      { t: 0.5, reading: reading(0.5, { cp: 149, maxHp: undefined }) },
+      { t: 0.75, reading: reading(0.75) },
+      { t: 1, reading: reading(1) },
+    ])
+  );
+  assert.equal(mons.length, 1);
+  assert.equal(mons[0].frames, 5);
+  assert.equal(mons[0].maxHp, 128);
+  assert.equal(mons[0].cpVotes[0].value, 1498);
+  assert.deepEqual(merged, []);
+});
+
+test('mergeDuplicates leaves a half-read whose CP matches nothing alone', () => {
+  // The same split, but the HP-less side read a CP the other side never saw:
+  // that is the one-frame misread the level arithmetic drops downstream, and
+  // folding it in would poison the real Pokemon's vote instead.
+  const { mons } = mergeDuplicates(
+    groupReadings([
+      { t: 0, reading: reading(0) },
+      { t: 0.25, reading: reading(0.25, { cp: 1198, maxHp: undefined }) },
+      { t: 0.5, reading: reading(0.5) },
+    ])
+  );
+  assert.equal(mons.length, 2);
+});
+
+test('groupReadings splits two Pokemon that share a species and max HP by their settled IVs', () => {
+  // Recorded off a real box: two shadow Palkia back to back with the same max
+  // HP, which is the one thing sameMon keys on. The bars tell them apart --
+  // each holds a different triple perfectly still -- and without the split
+  // the IV vote quietly erases one of them.
+  const a = { atk: 10, def: 15, hp: 10 };
+  const b = { atk: 13, def: 8, hp: 10 };
+  const groups = groupReadings([
+    ...[0, 0.15, 0.3, 0.45].map((t) => ({ t, reading: reading(t, { cp: 873, maxHp: 74, ivs: a }) })),
+    ...[0.6, 0.75, 0.9, 1.05].map((t) => ({ t, reading: reading(t, { cp: 869, maxHp: 74, ivs: b }) })),
+  ]);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups[0].ivs, a);
+  assert.deepEqual(groups[1].ivs, b);
+  assert.equal(groups[0].cpVotes[0].value, 873);
+  assert.equal(groups[1].cpVotes[0].value, 869);
+});
+
+test('groupReadings does not split one Pokemon whose bars animated in', () => {
+  // The animation shows two or three short-bar frames before the bars settle;
+  // no short triple holds for three consecutive frames, so there is only one
+  // plateau and no cut.
+  const settled = { atk: 8, def: 14, hp: 10 };
+  const groups = groupReadings([
+    { t: 0, reading: reading(0, { ivs: { atk: 3, def: 6, hp: 4 } }) },
+    { t: 0.15, reading: reading(0.15, { ivs: { atk: 6, def: 11, hp: 8 } }) },
+    ...[0.3, 0.45, 0.6].map((t) => ({ t, reading: reading(t, { ivs: settled }) })),
+  ]);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].ivs, settled);
+});
+
 test('mergeDuplicates reports a Pokemon the recording swiped back over', () => {
   const other = { speciesId: 'feraligatr', name: 'Feraligatr' };
   const { mons, merged } = mergeDuplicates(
@@ -377,6 +493,45 @@ test('mergeDuplicates reports a Pokemon the recording swiped back over', () => {
 });
 
 // ------------------------------------------------------------------- csv --
+
+// ---------------------------------------------------------------- badges --
+
+test('readBadgeColors names each badge circle from its colour', () => {
+  const ref = [240, 235, 225];
+  // What the probe would measure: the palette colour dimmed by the panel's
+  // veil, and, at a circle's edge tiles, further mixed toward card white.
+  const veil = (c) => c.map((v, i) => Math.round((v * ref[i]) / 255));
+  const dilute = (c, f) => c.map((v) => Math.round(255 - (255 - v) * f));
+  const poison = [200, 162, 206];
+  const fairy = [228, 187, 209];
+  const circles = readBadgeColors([
+    [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], // aura boxes
+    ref,
+    ref, // bare card, under the same veil as the reference tile
+    veil(dilute(poison, 0.7)),
+    veil(poison),
+    ref,
+    veil(dilute(fairy, 0.8)),
+    veil(fairy),
+    veil(dilute(fairy, 0.6)),
+    ref,
+  ]);
+  assert.equal(circles.length, 2);
+  assert.equal(circles[0][0], 'poison');
+  assert.equal(circles[1][0], 'fairy');
+});
+
+test('readBadgeColors reads nothing without badge tiles or a card to compare against', () => {
+  assert.equal(readBadgeColors(undefined), undefined);
+  assert.equal(readBadgeColors([[9, 9, 9], [9, 9, 9], [9, 9, 9], [9, 9, 9]]), undefined);
+  // A dark reference tile means the row is not on the white card at all --
+  // a recording with a different aspect ratio puts something else there.
+  assert.equal(readBadgeColors(Array.from({ length: 14 }, () => [40, 40, 40])), undefined);
+});
+
+test('classify offers nothing for bare card', () => {
+  assert.deepEqual(classify([250, 250, 250]), []);
+});
 
 test('toCsv writes the generic collection format the importer already reads', () => {
   const csv = toCsv([
@@ -481,18 +636,20 @@ test('readFrame reads a frame whose CP the Pokemon is standing in front of', () 
 
 test('chooseCp keeps a CP that was read and that the stats allow', () => {
   const chosen = chooseCp([{ value: 960, count: 5 }], [960, 968]);
-  assert.deepEqual(chosen, { cp: 960, reconstructed: false });
+  assert.deepEqual(chosen, { cp: 960, evidence: 'exact', reconstructed: false });
 });
 
 test('chooseCp recovers a CP the animation cut short', () => {
   // "96" was read; only 960 both fits the stats and starts with it.
-  assert.deepEqual(chooseCp([{ value: 96, count: 4 }], [960, 1122]), { cp: 960, reconstructed: true });
+  assert.deepEqual(chooseCp([{ value: 96, count: 4 }], [960, 1122]), { cp: 960, evidence: 'partial', reconstructed: true });
   // The cut can take the front instead of the back.
-  assert.deepEqual(chooseCp([{ value: 498, count: 2 }], [2498, 1704]), { cp: 2498, reconstructed: true });
+  assert.deepEqual(chooseCp([{ value: 498, count: 2 }], [2498, 1704]), { cp: 2498, evidence: 'partial', reconstructed: true });
+  // Or the middle: "172" is 1272 with a digit covered, and not 1271.
+  assert.deepEqual(chooseCp([{ value: 172, count: 3 }], [1272, 1271]), { cp: 1272, evidence: 'partial', reconstructed: true });
 });
 
 test('chooseCp takes the only possible CP when nothing legible was read', () => {
-  assert.deepEqual(chooseCp([], [1498]), { cp: 1498, reconstructed: true });
+  assert.deepEqual(chooseCp([], [1498]), { cp: 1498, evidence: 'sole', reconstructed: true });
 });
 
 test('chooseCp refuses to guess between equally possible CPs', () => {
@@ -574,6 +731,30 @@ test('scanFrames recovers an obscured CP and survives the bar animation', async 
   assert.ok(warnings.some((w) => /Chandelure.*animation covers it.*960/.test(w)), warnings.join('\n'));
 });
 
+test('scanFrames drops a one-frame CP misread instead of writing a ghost row', async () => {
+  // One frame in the middle of Trevenant's run garbles a CP digit and loses
+  // the HP line at the same time. That frame cannot join either neighbour
+  // (identity falls back to CP when HP is unreadable), so it becomes a
+  // one-frame group of its own -- whose CP the stats then prove impossible.
+  const real = frameAt(TREVENANT.t);
+  const ghost = {
+    ...real,
+    t: real.t + 0.25,
+    text: real.text
+      .filter((b) => !/\bhp\b/i.test(b.s))
+      .map((b) => (/^cp/i.test(String(b.s).replace(/\s+/g, '')) ? { ...b, s: 'CP 1198' } : b)),
+  };
+  const { mons, warnings } = await scanFrames([real, ghost, { ...real, t: real.t + 0.5 }]);
+  assert.deepEqual(
+    mons.map((m) => [m.name, m.cp]),
+    [['Trevenant', TREVENANT.cp]]
+  );
+  assert.ok(
+    warnings.some((w) => /Trevenant: one frame read CP 1198.*dropped as a misread/.test(w)),
+    warnings.join('\n')
+  );
+});
+
 test('createLevelDeriver can solve from max HP alone, listing the CPs it allows', async () => {
   const ctx = await initEngine();
   const deriveLevel = createLevelDeriver(ctx);
@@ -608,6 +789,18 @@ test('readTypes reads the badge row however Vision truncates it', () => {
   assert.deepEqual(readTypes(card('GHỌ')), ['ghost']);
   assert.deepEqual(readTypes(card('ROC')), ['rock']);
   assert.deepEqual(readTypes(card('ROCK / WATER|')), ['rock', 'water']);
+});
+
+test('readTypes reads a dual badge glued into one token with its front clipped', () => {
+  // The trainer avatar clips the second name's first letter and the OCR
+  // loses the separator: "POISONAIRY" is POISON then [F]AIRY.
+  const card = (s) => [
+    { x: 0.42, y: 0.469, w: 0.17, h: 0.02, c: 1, s: '101 / 101 HP' },
+    { x: 0.4, y: 0.565, w: 0.2, h: 0.02, c: 1, s },
+  ];
+  assert.deepEqual(readTypes(card('POISONAIRY')), ['poison', 'fairy']);
+  // A tail too short to be unambiguous stays unread rather than guessed at.
+  assert.deepEqual(readTypes(card('POISONON')), ['poison']);
 });
 
 test('readTypes ignores the labels that share the badge row', () => {

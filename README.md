@@ -5,9 +5,12 @@ from Pokemon to Pokemon — into a collection CSV
 (`name,atk,def,sta,shadow,level,cp`). No Poke Genie export to keep up to
 date, no manual data entry.
 
-**macOS only.** Frame decoding is AVFoundation and text recognition is
-Apple's Vision framework, both macOS system frameworks — no npm dependency,
-no ffmpeg, no OCR install.
+**Runs on macOS and Windows (including WSL2).** On macOS, frame decoding is
+AVFoundation and text recognition is Apple's Vision framework, both system
+frameworks — no npm dependency, no ffmpeg, no OCR install. On Windows the
+text is read by the OS's built-in Windows OCR engine, so the one install is
+ffmpeg for frame decoding. Plain Linux has neither a decoder nor an OCR
+engine to lean on and is not supported.
 
 Originally built as the video importer for
 [pogo-gbl-team-generator](https://github.com/Gidntsquia/pogo-gbl-team-generator),
@@ -16,8 +19,15 @@ buildable from it.
 
 ## Setup
 
-Requires Node ≥ 18 and the Xcode Command Line Tools
-(`xcode-select --install`).
+Requires Node ≥ 18, plus:
+
+- **macOS** — the Xcode Command Line Tools (`xcode-select --install`).
+- **Windows** — ffmpeg (`winget install -e --id Gyan.FFmpeg`, then reopen
+  the terminal). Windows OCR ships with Windows 10/11; it needs the English
+  (United States) language pack, which is present on almost every install.
+- **WSL2** — ffmpeg inside the distro (`sudo apt install ffmpeg`); a Windows
+  `ffmpeg.exe` on the PATH works too. OCR still runs through the host's
+  `powershell.exe`, so nothing else to install.
 
 ```bash
 npm run setup   # or: bash scripts/setup.sh
@@ -37,8 +47,9 @@ node scripts/scan-video.mjs my-box.mp4 --out out/scanned.csv
 
 **How to record.** Open a Pokemon, tap **Appraise** so the three stat bars
 are showing, then swipe through your box resting about a second on each
-Pokemon. AirDrop the recording to your Mac. Frames caught mid-swipe are
-thrown away on purpose, which is why the pause matters.
+Pokemon. Get the recording onto the computer (AirDrop on a Mac, cable or
+cloud on Windows). Frames caught mid-swipe are thrown away on purpose,
+which is why the pause matters.
 
 Two things the game does make this harder than it sounds, and the scanner
 handles both rather than trusting any single frame:
@@ -146,14 +157,22 @@ scans in about 14 seconds.
 
 ## How it works
 
-The only non-JS piece is the small `src/videoscan/scan.swift` helper, which
-decodes frames (AVFoundation) and reads text and pixel regions (Vision). It
-is compiled once into `out/.videoscan/` and reused (an unoptimized script
-run is ~5x slower, since it measures every pixel of every sampled frame).
-Everything it doesn't do — deciding what a frame shows, measuring the bars,
-grouping frames into Pokemon, solving levels and forms — is plain JavaScript
-in `src/videoscan/`, unit-tested against recorded frames in
+The platform-specific work — decode a frame, OCR its text, summarise one
+region's pixels — produces identical per-frame observations on both OSes,
+and everything downstream of it (deciding what a frame shows, measuring the
+bars, grouping frames into Pokemon, solving levels and forms) is shared
+JavaScript in `src/videoscan/`, unit-tested against recorded frames in
 `fixtures/videoscan/`.
+
+- **macOS** — the small `src/videoscan/scan.swift` helper does all three
+  (AVFoundation + Vision). It is compiled once into `out/.videoscan/` and
+  reused (an unoptimized script run is ~5x slower, since it measures every
+  pixel of every sampled frame).
+- **Windows / WSL2** — `src/videoscan/probe-win.js` splits the same three
+  jobs: ffmpeg pipes raw frames in, `src/videoscan/pixels.js` (a
+  line-for-line port of scan.swift's pixel encoder) measures them, and
+  `src/videoscan/ocr.ps1` runs the OS's built-in Windows.Media.Ocr engine
+  as a persistent PowerShell child.
 
 - `src/videoscan/` — the scanner: frame classification, bar measurement,
   caption → species resolution, shadow detection, grouping, level/form
@@ -176,14 +195,14 @@ npm test
 a phone — `fixtures/videoscan/appraisal-frames.jsonl` (a downscaled clip)
 and `ultra-frames.jsonl` (full resolution, including a maxed stat drawn in
 red, a CP behind the Pokemon's animation, and a frame caught while the bars
-were still filling) — so the tests need no video and no macOS frameworks to
-run (they work on Linux; only the actual video scan is macOS-only). The
-level-derivation tests boot the vendored pvpoke engine, so `npm run setup`
-must have been run first.
+were still filling) — so the tests need no video, no macOS frameworks and no
+Windows OCR to run (they pass on any OS; only the actual video scan needs
+macOS or Windows). The level-derivation tests boot the vendored pvpoke
+engine, so `npm run setup` must have been run first.
 
 ## Known limitations
 
-- macOS-only (AVFoundation + Vision); the recording needs the appraisal
-  panel visible.
+- macOS and Windows/WSL2 only (plain Linux is not supported); the recording
+  needs the appraisal panel visible.
 - Cannot see a Pokemon's moves, Lucky or Best Buddy status. Shadow it does
   read, from the sliver of page above the panel (see "Shadow" above).

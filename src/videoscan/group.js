@@ -22,6 +22,8 @@ const DEFAULT_GAP_TOLERANCE = 3;
  * @property {{speciesId: string, name: string, types: string[]}[]} candidates - every
  *   species the caption could mean (see species.js); one entry for almost all.
  * @property {string[]} types - the type badges read off this frame.
+ * @property {string[][]} [badges] - the badge circles' colours, one
+ *   plausible-type set per circle (badges.js); absent without badge tiles.
  * @property {boolean} shadow
  * @property {boolean} [button] - what the action button above the appraisal
  *   panel said (purify.js): true PURIFY, false POWER UP, undefined hidden.
@@ -72,7 +74,62 @@ export function groupReadings(frames, opts = {}) {
     current.readings.push(reading);
   }
 
-  return applyHints(groups.map(summarize), hints);
+  return applyHints(groups.flatMap(splitPlateaus).map(summarize), hints);
+}
+
+/**
+ * Split a group that provably contains two different Pokemon.
+ *
+ * sameMon keys on max HP precisely because the IVs animate -- but that lets
+ * two adjacent Pokemon of the same species and max HP fall into one group,
+ * where the IV vote quietly erases one of them (a recording with two shadow
+ * Palkia back to back did exactly this). The IVs still tell them apart once
+ * the animation is discounted: a triple that holds perfectly still for
+ * several consecutive frames is a settled reading, not a bar mid-fill, and
+ * one Pokemon cannot settle on two different triples. Each plateau becomes
+ * its own group; the unsettled frames between two plateaus are the next
+ * card's bars animating in, so they go with the plateau that follows them.
+ *
+ * The bars alone are not allowed to say it, though: a bar sitting on a
+ * notch's edge can hold a wrong triple perfectly still too, and splitting
+ * on that invents a Pokemon. So a cut also needs the CP text to disagree
+ * across it -- two Pokemon alike enough to fall into one group here always
+ * differ visibly in CP, while one Pokemon's CP text reads the same number
+ * on both sides of a bar flicker.
+ */
+const PLATEAU_MIN_FRAMES = 3;
+
+function splitPlateaus(group) {
+  const rs = group.readings;
+  const key = (r) => `${r.ivs.atk}/${r.ivs.def}/${r.ivs.hp}`;
+  const plateaus = [];
+  for (let i = 0; i < rs.length; ) {
+    let j = i;
+    while (j < rs.length && key(rs[j]) === key(rs[i])) j += 1;
+    if (j - i >= PLATEAU_MIN_FRAMES) plateaus.push({ triple: key(rs[i]), start: i, end: j - 1 });
+    i = j;
+  }
+
+  const topCp = (p) => {
+    const cps = rs.slice(p.start, p.end + 1).map((r) => r.cp).filter((v) => v !== undefined);
+    return votes(cps)[0]?.value;
+  };
+  const cuts = [];
+  for (let p = 1; p < plateaus.length; p++) {
+    if (plateaus[p].triple === plateaus[p - 1].triple) continue;
+    const [a, b] = [topCp(plateaus[p - 1]), topCp(plateaus[p])];
+    if (a !== undefined && b !== undefined && !cpAgrees(a, b)) cuts.push(plateaus[p - 1].end + 1);
+  }
+  if (cuts.length === 0) return [group];
+
+  const parts = [];
+  let start = 0;
+  for (const cut of [...cuts, rs.length]) {
+    const readings = rs.slice(start, cut);
+    parts.push({ first: readings[0], readings });
+    start = cut;
+  }
+  return parts;
 }
 
 /**
@@ -125,9 +182,11 @@ function sameMon(group, reading) {
   if (first.speciesId !== reading.speciesId) return false;
   if (first.shadow !== reading.shadow) return false;
   if (first.maxHp !== undefined && reading.maxHp !== undefined) return first.maxHp === reading.maxHp;
-  // No HP on one side: fall back to CP, and to species alone if neither
-  // number was legible.
-  if (first.cp !== undefined && reading.cp !== undefined) return first.cp === reading.cp;
+  // No HP on one side: fall back to CP -- allowing the truncations the CP
+  // text actually suffers ("123" for 1237 is the animation over the last
+  // digit, not another Pokemon) -- and to species alone if neither number
+  // was legible.
+  if (first.cp !== undefined && reading.cp !== undefined) return cpAgrees(first.cp, reading.cp);
   return true;
 }
 
@@ -148,6 +207,10 @@ function summarize(group) {
     // "psychic + flying" seen once says strictly more about which Oricorio
     // this is than "psychic" seen three times.
     types: bestTypes(rs.map((r) => r.types ?? [])),
+    // Every frame's badge-circle reading (badges.js), kept whole: index.js
+    // asks per candidate form how many frames' circles rule it out, which a
+    // vote here would flatten away.
+    badges: rs.map((r) => r.badges).filter((b) => Array.isArray(b)),
     shadow: group.first.shadow || readShadow(rs).shadow === true,
     // Whether this Pokemon's shadow flag was actually read off the screen or
     // merely left at its default, and which of the two things that can say so
@@ -274,7 +337,7 @@ export function mergeDuplicates(groups) {
   const byKey = new Map();
   const merged = [];
   let lastKey = null;
-  for (const group of groups) {
+  for (const group of rejoinHalfReads(groups)) {
     const key = [group.speciesId, group.shadow, group.maxHp, group.ivs.atk, group.ivs.def, group.ivs.hp].join('|');
     const seen = byKey.get(key);
     if (!seen) {
@@ -286,6 +349,7 @@ export function mergeDuplicates(groups) {
     seen.tEnd = Math.max(seen.tEnd, group.tEnd);
     if (seen.maxHp === undefined) seen.maxHp = group.maxHp;
     seen.cpVotes = [...seen.cpVotes, ...group.cpVotes];
+    seen.badges = [...(seen.badges ?? []), ...(group.badges ?? [])];
     seen.ivDisagreement = seen.ivDisagreement || group.ivDisagreement;
     seen.shadowKnown = seen.shadowKnown || group.shadowKnown;
     seen.maxDelta = Math.max(seen.maxDelta, group.maxDelta);
@@ -293,4 +357,84 @@ export function mergeDuplicates(groups) {
     lastKey = key;
   }
   return { mons: [...byKey.values()], merged };
+}
+
+/**
+ * Rejoin a Pokemon whose run of frames split in two because the frames on one
+ * side never read the max HP.
+ *
+ * Identity falls back to the CP where the HP is unreadable (see sameMon), and
+ * the CP text is exactly the reading that flickers -- so one garbled digit at
+ * the frame where the HP first becomes legible splits a single Pokemon into a
+ * group with HP and a group without. Two back-to-back groups that agree on
+ * species, shadow and IVs, whose CPs agree, and of which only one ever read
+ * an HP, are that one Pokemon: a genuine neighbour would have to share all
+ * of that at once, back to back, which none of the recordings this was
+ * measured against ever produced.
+ *
+ * The halves must agree on the CP for a reason: a one-frame group whose CP
+ * matches nothing around it is a misread, and it is left alone here so the
+ * level arithmetic downstream can prove that and drop it.
+ */
+function rejoinHalfReads(groups) {
+  const out = [];
+  for (const group of groups) {
+    out.push(group);
+    // Re-checked after every merge, because the run can split into *three*:
+    // the frame that garbles the CP routinely loses the HP line too, so it
+    // sits alone between an HP-less lead-in and the HP-bearing rest. Folding
+    // the middle into its neighbour is what lets the lead-in match next.
+    while (out.length >= 2 && halfReadPair(out[out.length - 2], out[out.length - 1])) {
+      const b = out.pop();
+      const a = out.pop();
+      const [full, half] = a.maxHp !== undefined ? [a, b] : [b, a];
+      full.frames += half.frames;
+      full.tStart = Math.min(full.tStart, half.tStart);
+      full.tEnd = Math.max(full.tEnd, half.tEnd);
+      // Commonest first across both halves, like a group that never split:
+      // index.js checks every vote against the HP anyway, but the head of
+      // the list is what a --no-level scan writes.
+      full.cpVotes = [...full.cpVotes, ...half.cpVotes].sort((x, y) => y.count - x.count);
+      full.ivDisagreement = full.ivDisagreement || half.ivDisagreement;
+      full.shadowKnown = full.shadowKnown || half.shadowKnown;
+      if (full.shadowSource === undefined) full.shadowSource = half.shadowSource;
+      if (half.types.length > full.types.length) full.types = half.types;
+      full.badges = [...(full.badges ?? []), ...(half.badges ?? [])];
+      full.maxDelta = Math.max(full.maxDelta, half.maxDelta);
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function halfReadPair(a, b) {
+  if (a.speciesId !== b.speciesId || a.shadow !== b.shadow || a.purified !== b.purified) return false;
+  if ((a.maxHp === undefined) === (b.maxHp === undefined)) return false;
+  if (['atk', 'def', 'hp'].some((k) => a.ivs[k] !== b.ivs[k])) return false;
+  const [full, half] = a.maxHp !== undefined ? [a, b] : [b, a];
+  const top = half.cpVotes[0]?.value;
+  // A side with no CP reading at all cannot disagree -- the frame that
+  // finally shows the HP line is routinely the one whose CP the animation
+  // has swallowed whole, not just truncated.
+  if (top === undefined || full.cpVotes.length === 0) return true;
+  return full.cpVotes.some((v) => cpAgrees(v.value, top));
+}
+
+/**
+ * Do two CP readings describe the same number? Equal, or the shorter is the
+ * longer with one contiguous span of digits covered -- the same truncation
+ * chooseCp treats as evidence, because the Pokemon's animation crosses the
+ * CP text as one shape: it cuts "1496" to "149", to "496", or -- covering a
+ * digit in the middle -- to "146". Two same-length different numbers are
+ * two numbers.
+ */
+function cpAgrees(x, y) {
+  if (x === y) return true;
+  let [a, b] = [String(x), String(y)];
+  if (a.length === b.length) return false;
+  if (b.length > a.length) [a, b] = [b, a];
+  for (let take = 0; take <= b.length; take++) {
+    if (a.startsWith(b.slice(0, take)) && a.endsWith(b.slice(take))) return true;
+  }
+  return false;
 }
