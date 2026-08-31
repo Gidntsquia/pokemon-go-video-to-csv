@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="520" height="210" viewBox="0 0 520 210" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
-  <rect width="520" height="210" rx="10" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="270" viewBox="0 0 520 270" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <rect width="520" height="270" rx="10" fill="#0d1117"/>
   <rect width="520" height="40" rx="10" fill="#161b22"/>
   <rect y="30" width="520" height="10" fill="#161b22"/>
   <circle cx="22" cy="20" r="6" fill="#ff5f56"/>
@@ -22,26 +22,36 @@
 
     <!-- rows -->
     <g fill="#c9d1d9">
-      <!-- Zeraora,15,10,10,,15.5,1477 -->
-      <text x="20" y="100" fill="#e6edf3">Zeraora</text>
-      <text x="200" y="100">15</text><text x="236" y="100">10</text><text x="272" y="100">10</text>
+      <!-- Entei,10,11,10,,15.5,1477 -->
+      <text x="20" y="100" fill="#e6edf3">Entei</text>
+      <text x="200" y="100">10</text><text x="236" y="100">11</text><text x="272" y="100">10</text>
       <text x="380" y="100">15.5</text><text x="452" y="100" fill="#f0883e">1477</text>
 
+      <!-- Zeraora,15,10,10,,15.5,1477 -->
+      <text x="20" y="126" fill="#e6edf3">Zeraora</text>
+      <text x="200" y="126">15</text><text x="236" y="126">10</text><text x="272" y="126">10</text>
+      <text x="380" y="126">15.5</text><text x="452" y="126" fill="#f0883e">1477</text>
+
       <!-- Golurk,14,13,10,1,18.5,1476 -->
-      <text x="20" y="126" fill="#e6edf3">Golurk</text>
-      <text x="200" y="126">14</text><text x="236" y="126">13</text><text x="272" y="126">10</text>
-      <text x="308" y="126" fill="#a78bfa">1</text>
-      <text x="380" y="126">18.5</text><text x="452" y="126" fill="#f0883e">1476</text>
+      <text x="20" y="152" fill="#e6edf3">Golurk</text>
+      <text x="200" y="152">14</text><text x="236" y="152">13</text><text x="272" y="152">10</text>
+      <text x="308" y="152" fill="#a78bfa">1</text>
+      <text x="380" y="152">18.5</text><text x="452" y="152" fill="#f0883e">1476</text>
 
       <!-- Zoroark (Hisuian),5,7,9,,21.5,1476 -->
-      <text x="20" y="152" fill="#e6edf3">Zoroark (Hisuian)</text>
-      <text x="200" y="152">5</text><text x="236" y="152">7</text><text x="272" y="152">9</text>
-      <text x="380" y="152">21.5</text><text x="452" y="152" fill="#f0883e">1476</text>
+      <text x="20" y="178" fill="#e6edf3">Zoroark (Hisuian)</text>
+      <text x="200" y="178">5</text><text x="236" y="178">7</text><text x="272" y="178">9</text>
+      <text x="380" y="178">21.5</text><text x="452" y="178" fill="#f0883e">1476</text>
 
       <!-- Hippowdon,0,15,15,,18,1476 -->
-      <text x="20" y="178" fill="#e6edf3">Hippowdon</text>
-      <text x="200" y="178">0</text><text x="236" y="178">15</text><text x="272" y="178">15</text>
-      <text x="380" y="178">18</text><text x="452" y="178" fill="#f0883e">1476</text>
+      <text x="20" y="204" fill="#e6edf3">Hippowdon</text>
+      <text x="200" y="204">0</text><text x="236" y="204">15</text><text x="272" y="204">15</text>
+      <text x="380" y="204">18</text><text x="452" y="204" fill="#f0883e">1476</text>
+
+      <!-- Steelix,1,12,7,,24,1474 -->
+      <text x="20" y="230" fill="#e6edf3">Steelix</text>
+      <text x="200" y="230">1</text><text x="236" y="230">12</text><text x="272" y="230">7</text>
+      <text x="380" y="230">24</text><text x="452" y="230" fill="#f0883e">1474</text>
     </g>
   </g>
 </svg>

@@ -1,7 +1,7 @@
 # Pokemon GO Video-to-CSV 📹
 
 <p align="center">
-  <img alt="A screen recording swiping through appraised Pokemon, including a shadow Golurk and a Hisuian Zoroark" src="docs/appraisal-demo.gif" width="240">
+  <img alt="A screen recording swiping through six appraised Pokemon, including a shadow Golurk and a Hisuian Zoroark" src="docs/appraisal-demo.gif" width="240">
 </p>
 
 That swipe becomes these rows:
