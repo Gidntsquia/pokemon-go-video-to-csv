@@ -11,11 +11,10 @@ That swipe becomes these rows:
 </p>
 
 Take a screen recording of your Pokemon GO box (appraisal panel open,
-swiping from Pokemon to Pokemon) and this turns it into a collection CSV:
-`name,atk,def,sta,shadow,level,cp`. Saves me from doing a Poke Genie export
-and cleaning it up by hand every time.
+swiping from Pokemon to Pokemon) and turn it into a collection CSV:
+`name,atk,def,sta,shadow,level,cp`. 
 
-Started as the video importer for
+Use in tandem with 
 [pogo-gbl-team-generator](https://github.com/Gidntsquia/pogo-gbl-team-generator),
 which reads the CSV this makes and figures out the best GO Battle League
 teams you can build from it.
@@ -58,9 +57,8 @@ node scripts/verify.mjs out/scanned.csv reference.csv   # check a scan against a
 - Works on macOS (AVFoundation + Vision) and Windows/WSL2 (ffmpeg + the
   Windows OCR that's already built in) — nothing extra to install for OCR
   on either one.
-- Figures out level and form on its automatically.
-- Picks up shadow Pokemon from a sliver of the details page that peeks out
-  above the appraisal panel, even though nothing on screen labels it.
+- Figures out form automatically.
+- Picks up shadow Pokemon (sliver of purify button + shadowy flame recognition).
 - Looks at every frame a Pokemon shows up in (not just one) to settle on
   its CP and IVs.
 - Double-checks every row against pvpoke's own CP/level math before writing
