@@ -6,6 +6,7 @@
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "scan": "node scripts/scan-video.mjs",
+    "verify": "node scripts/verify.mjs",
     "test": "node --test test/*.test.js"
   }
 }

@@ -9,7 +9,14 @@ pogo-gbl-team-generator, which consumes the CSV.
 - `npm run setup` — clones a pinned sparse copy of pvpoke into
   `vendor/pvpoke` (gitignored). Required after every fresh clone; there are
   no npm dependencies to install.
-- `npm run scan -- my-box.mp4 --out out/scanned.csv` — run the scanner
+- `scripts/scan.sh my-box.mp4` — preferred way to scan: runs setup if
+  vendor/pvpoke is missing, checks ffmpeg/powershell.exe, then scans to
+  `out/<video-name>.csv`. Extra flags pass through to scan-video.mjs.
+- `npm run scan -- my-box.mp4 --out out/scanned.csv` — the raw scanner CLI
+- `npm run verify -- out/scanned.csv reference.csv` — diff a scan against a
+  hand-checked reference CSV; prints per-row mismatches, exits non-zero
+  below 100% (`--min N` to relax, `--ignore level,cp` to skip columns).
+  Use this instead of composing ad-hoc diff commands.
 - `npm test` — `node --test test/*.test.js`
 
 ## Layout
