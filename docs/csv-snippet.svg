@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="288" viewBox="0 0 480 288" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <rect width="480" height="288" rx="10" fill="#0d1117"/>
+  <rect width="480" height="40" rx="10" fill="#161b22"/>
+  <rect y="30" width="480" height="10" fill="#161b22"/>
+  <circle cx="22" cy="20" r="6" fill="#ff5f56"/>
+  <circle cx="42" cy="20" r="6" fill="#ffbd2e"/>
+  <circle cx="62" cy="20" r="6" fill="#27c93f"/>
+  <text x="240" y="25" text-anchor="middle" font-size="13" fill="#8b949e">out/scanned.csv</text>
+
+  <g font-size="14">
+    <!-- header -->
+    <g fill="#8b949e">
+      <text x="20"  y="66">name</text>
+      <text x="140" y="66">atk</text>
+      <text x="180" y="66">def</text>
+      <text x="220" y="66">sta</text>
+      <text x="260" y="66">shadow</text>
+      <text x="336" y="66">level</text>
+      <text x="398" y="66">cp</text>
+    </g>
+    <line x1="20" y1="76" x2="460" y2="76" stroke="#21262d" stroke-width="1"/>
+
+    <!-- rows -->
+    <g fill="#c9d1d9">
+      <!-- Lanturn,0,13,14,,28,1500 -->
+      <text x="20" y="100" fill="#e6edf3">Lanturn</text>
+      <text x="140" y="100">0</text><text x="180" y="100">13</text><text x="220" y="100">14</text>
+      <text x="336" y="100">28</text><text x="398" y="100" fill="#f0883e">1500</text>
+
+      <!-- Sylveon,13,12,12,,17.5,1500 -->
+      <text x="20" y="126" fill="#e6edf3">Sylveon</text>
+      <text x="140" y="126">13</text><text x="180" y="126">12</text><text x="220" y="126">12</text>
+      <text x="336" y="126">17.5</text><text x="398" y="126" fill="#f0883e">1500</text>
+
+      <!-- Blastoise,15,13,13,,21.5,1500 -->
+      <text x="20" y="152" fill="#e6edf3">Blastoise</text>
+      <text x="140" y="152">15</text><text x="180" y="152">13</text><text x="220" y="152">13</text>
+      <text x="336" y="152">21.5</text><text x="398" y="152" fill="#f0883e">1500</text>
+
+      <!-- Escavalier,8,10,14,,19,1499 -->
+      <text x="20" y="178" fill="#e6edf3">Escavalier</text>
+      <text x="140" y="178">8</text><text x="180" y="178">10</text><text x="220" y="178">14</text>
+      <text x="336" y="178">19</text><text x="398" y="178" fill="#f0883e">1499</text>
+
+      <!-- Granbull,11,8,4,,22,1499 -->
+      <text x="20" y="204" fill="#e6edf3">Granbull</text>
+      <text x="140" y="204">11</text><text x="180" y="204">8</text><text x="220" y="204">4</text>
+      <text x="336" y="204">22</text><text x="398" y="204" fill="#f0883e">1499</text>
+
+      <!-- Golbat,1,9,7,,30,1499 -->
+      <text x="20" y="230" fill="#e6edf3">Golbat</text>
+      <text x="140" y="230">1</text><text x="180" y="230">9</text><text x="220" y="230">7</text>
+      <text x="336" y="230">30</text><text x="398" y="230" fill="#f0883e">1499</text>
+
+      <!-- Beedrill,2,15,13,,31.5,1499 -->
+      <text x="20" y="256" fill="#e6edf3">Beedrill</text>
+      <text x="140" y="256">2</text><text x="180" y="256">15</text><text x="220" y="256">13</text>
+      <text x="336" y="256">31.5</text><text x="398" y="256" fill="#f0883e">1499</text>
+    </g>
+  </g>
+</svg>
