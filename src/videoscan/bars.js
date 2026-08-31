@@ -36,6 +36,17 @@ const bandTolerances = (frameWidth) => ({
 });
 /** A band needs at least this many rows to be a bar rather than a stray line. */
 const MIN_BAND_ROWS = 3;
+/**
+ * How many consecutive rows may go missing mid-bar before a band is
+ * considered broken rather than merely interrupted. encodeRow (pixels.js)
+ * drops a row outright when compression blur softens its fill/track edge
+ * below the boundary threshold; on a heavily-filled bar that happens to a
+ * couple of rows at a time, well inside one physical bar (verified against a
+ * real recording: two straight rows missing from the middle of an otherwise
+ * uniform ~14/15 band). Different bars sit tens of rows apart, so this stays
+ * far short of bridging two of them together.
+ */
+const MAX_ROW_GAP = 6;
 /** How far a measured IV may sit from a whole number before we flag it. */
 export const IV_SNAP_WARN = 0.32;
 
@@ -174,7 +185,7 @@ export function findBands(rows, frameWidth) {
     // their own -- which then look exactly like a second panel of bars.
     const contiguous =
       current &&
-      row.y - current.yEnd <= 2 &&
+      row.y - current.yEnd <= MAX_ROW_GAP &&
       Math.abs(bar.x0 - current.x0) <= tolerance.x &&
       Math.abs(bar.width - current.width) <= tolerance.width;
     if (contiguous) {
