@@ -1,7 +1,7 @@
 # Pokemon GO Video-to-CSV 📹
 
 <p align="center">
-  <img alt="A screen recording swiping through appraised Pokemon" src="docs/appraisal-demo.gif" width="240">
+  <img alt="A screen recording swiping through appraised Pokemon, including a shadow Golurk and a Hisuian Zoroark" src="docs/appraisal-demo.gif" width="240">
 </p>
 
 That swipe becomes these rows:
@@ -24,10 +24,22 @@ teams you can build from it.
 
 1. Record yourself swiping through your box with the **Appraise** panel
    open, resting about a second on each Pokemon.
-2. Run this (needs Node ≥ 18, plus ffmpeg if you're on Windows/WSL2 — see
-   [Setup](https://github.com/Gidntsquia/pokemon-go-video-to-csv/wiki/Setup)):
+2. Run this (needs Node ≥ 18 either way; see
+   [Setup](https://github.com/Gidntsquia/pokemon-go-video-to-csv/wiki/Setup)
+   for details like the Windows OCR language pack):
 
+**macOS**
 ```
+xcode-select --install   # if you haven't already
+git clone https://github.com/Gidntsquia/pokemon-go-video-to-csv
+cd pokemon-go-video-to-csv
+npm run setup                # grabs pvpoke's engine + data, needed after every fresh clone
+scripts/scan.sh my-box.mp4   # scans to out/my-box.csv
+```
+
+**Windows / WSL2**
+```
+winget install -e --id Gyan.FFmpeg   # then reopen your terminal (WSL2: apt install ffmpeg works too)
 git clone https://github.com/Gidntsquia/pokemon-go-video-to-csv
 cd pokemon-go-video-to-csv
 npm run setup                # grabs pvpoke's engine + data, needed after every fresh clone
@@ -46,8 +58,7 @@ node scripts/verify.mjs out/scanned.csv reference.csv   # check a scan against a
 - Works on macOS (AVFoundation + Vision) and Windows/WSL2 (ffmpeg + the
   Windows OCR that's already built in) — nothing extra to install for OCR
   on either one.
-- Figures out level and form on its own, since Pokemon GO never actually
-  shows either of those.
+- Figures out level and form on its automatically.
 - Picks up shadow Pokemon from a sliver of the details page that peeks out
   above the appraisal panel, even though nothing on screen labels it.
 - Looks at every frame a Pokemon shows up in (not just one) to settle on
