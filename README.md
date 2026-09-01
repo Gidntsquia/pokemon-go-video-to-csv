@@ -78,3 +78,8 @@ More detail is in the
 - [How It Works](https://github.com/Gidntsquia/pokemon-go-video-to-csv/wiki/How-It-Works) — macOS vs. Windows/WSL2 split, code layout
 - [Development and Tests](https://github.com/Gidntsquia/pokemon-go-video-to-csv/wiki/Development-and-Tests) — running `npm test`, what the fixtures cover
 - [Known Limitations](https://github.com/Gidntsquia/pokemon-go-video-to-csv/wiki/Known-Limitations)
+
+## License 📄
+
+[MIT](LICENSE). The vendored CP/level math ([pvpoke](https://github.com/pvpoke/pvpoke))
+is also MIT-licensed and is downloaded at setup rather than distributed here.
